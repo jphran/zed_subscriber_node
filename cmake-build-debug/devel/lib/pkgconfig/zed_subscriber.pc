@@ -1,0 +1,8 @@
+prefix=/home/jfrancis/catkin_ws/src/zed_subscriber/cmake-build-debug/devel
+
+Name: zed_subscriber
+Description: Description of zed_subscriber
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 
