@@ -5,15 +5,98 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 
+struct Point {
+    int x;
+    int y;
+    float depth;
+    explicit Point(int xLoc = 0, int yLoc = 0, float ptDepth = std::nanf("0"))
+        : x(xLoc)
+        , y(yLoc)
+        , depth(ptDepth){};
+    ~Point() = default;;
+};
+struct BoundingBox {
+    Point upperLeft;
+    Point lowerRight;
+    float depth;
+    bool isTracking;
+    int imgWidth;
+    int imgHeight;
+    BoundingBox()
+        : upperLeft(Point())
+        , lowerRight(Point())
+        , depth(0.0f)
+        , isTracking(false)
+        , imgWidth(0)
+        , imgHeight(0){};
+};
+
+union ImageDataConverter {
+    float f;
+    uint8_t byte[4];
+} ImageData;
+
+void findNearest(BoundingBox& bb, std::vector<float> depths, int kernelSize = 4) {
+    int centerX = bb.upperLeft.x + ((bb.lowerRight.x - bb.upperLeft.x) / 2);
+    int centerY = bb.upperLeft.y + ((bb.lowerRight.y - bb.upperLeft.y) / 2);
+    int centerIdx = centerX + bb.imgWidth * centerY;
+
+//    ROS_INFO("center pixel, dist: %d, %g m", centerIdx, depths[centerIdx]);
+    int nearestPixelIdx = centerIdx;
+    int nearestPixelX = centerX;
+    int nearestPixelY = centerY;
+
+    // find the closest pixel in the bounding box
+    for(int i = bb.upperLeft.y; i < bb.lowerRight.y; i += kernelSize) {
+        for(int j = bb.upperLeft.x; j < bb.lowerRight.x; j += kernelSize) {
+            int nextPixelIdx = j + bb.imgWidth * i;
+            if(isnormal(depths[nextPixelIdx])
+                && depths[nextPixelIdx] < depths[nearestPixelIdx]) {
+                nearestPixelIdx = nextPixelIdx;
+                nearestPixelX = j;
+                nearestPixelY = i;
+            }
+        }
+    }
+
+//    if(nearestPixelIdx)
+    ROS_INFO("nearest pixel idx, depth: %d, %g m", nearestPixelIdx, depths[nearestPixelIdx]);
+
+    // if the pixel depth is valid, set the bounding box
+    if(isnormal(depths[nearestPixelIdx]) && not isinf(depths[nearestPixelIdx])) {
+        int dX = bb.imgWidth / 10;
+        int dY = bb.imgHeight / 10;
+        bb.upperLeft.x = nearestPixelX - dX;
+        bb.upperLeft.y = nearestPixelY - dY;
+        bb.lowerRight.x = nearestPixelX + dX;
+        bb.lowerRight.y = nearestPixelY + dY;
+
+        bb.depth = depths[nearestPixelIdx];
+        bb.isTracking = true;
+        ROS_INFO_THROTTLE(0.5, "good track, bb: (%d, %d), (%d, %d)", bb.upperLeft.x, bb.upperLeft.y, bb.lowerRight.x, bb.lowerRight.y);
+    }
+    else {
+        bb.isTracking = false;
+        bb.upperLeft = Point(0, 0);
+        bb.lowerRight = Point(bb.imgWidth, bb.imgHeight);
+        ROS_INFO("lost track");
+    }
+
+
+
+}
+
 /**
  * Subscriber callback
  */
-
 void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
-
-    // Get a pointer to the depth values casting the data
-    // pointer to floating point
-    float* depths = (float*)(&msg->data[0]);
+    BoundingBox bb;
+//     Get a pointer to the depth values casting the data
+//     pointer to floating point
+    float depthsArr[msg->data.size() / 4];
+    std::memcpy(depthsArr, &msg->data[0], sizeof(depthsArr));
+    std::vector<float> depths(depthsArr, depthsArr + sizeof(depthsArr) / sizeof(depthsArr[0]));
+//    auto depths = (float*) &msg->data[0];
 
     // Image coordinates of the center pixel
     int u = msg->width / 2;
@@ -23,7 +106,14 @@ void depthCallback(const sensor_msgs::Image::ConstPtr& msg) {
     int centerIdx = u + msg->width * v;
 
     // Output the measure
-    ROS_INFO("Center distance : %g m", depths[centerIdx]);
+//    ROS_INFO("Center pixel, distance : %d, %g m", centerIdx, depths[centerIdx]);
+
+
+    bb.imgWidth = msg->width;
+    bb.imgHeight = msg->height;
+    bb.upperLeft = Point(u - 100, v - 20);
+    bb.lowerRight = Point(u + 100, v + 20);
+    findNearest(bb, depths);
 }
 
 /**
