@@ -5,6 +5,8 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 
+constexpr char ZED_DEPTH_LOG[] = "Zed Depth Subscriber Node";
+
 struct Point {
     int x;
     int y;
@@ -16,6 +18,7 @@ struct Point {
     ~Point() = default;;
 };
 struct BoundingBox {
+    static const int IMG_TO_BB_SIZE_RATIO = 10;
     Point upperLeft;
     Point lowerRight;
     float depth;
@@ -59,13 +62,10 @@ void findNearest(BoundingBox& bb, std::vector<float> depths, int kernelSize = 4)
         }
     }
 
-//    if(nearestPixelIdx)
-    ROS_INFO("nearest pixel idx, depth: %d, %g m", nearestPixelIdx, depths[nearestPixelIdx]);
-
     // if the pixel depth is valid, set the bounding box
     if(isnormal(depths[nearestPixelIdx]) && not isinf(depths[nearestPixelIdx])) {
-        int dX = bb.imgWidth / 10;
-        int dY = bb.imgHeight / 10;
+        int dX = bb.imgWidth / BoundingBox::IMG_TO_BB_SIZE_RATIO;
+        int dY = bb.imgHeight / BoundingBox::IMG_TO_BB_SIZE_RATIO;
         bb.upperLeft.x = nearestPixelX - dX;
         bb.upperLeft.y = nearestPixelY - dY;
         bb.lowerRight.x = nearestPixelX + dX;
@@ -73,13 +73,14 @@ void findNearest(BoundingBox& bb, std::vector<float> depths, int kernelSize = 4)
 
         bb.depth = depths[nearestPixelIdx];
         bb.isTracking = true;
-        ROS_INFO_THROTTLE(0.5, "good track, bb: (%d, %d), (%d, %d)", bb.upperLeft.x, bb.upperLeft.y, bb.lowerRight.x, bb.lowerRight.y);
+        ROS_INFO_THROTTLE_NAMED(1, ZED_DEPTH_LOG, "bb: (%d, %d), (%d, %d), depth: %g m",
+                          bb.upperLeft.x, bb.upperLeft.y, bb.lowerRight.x, bb.lowerRight.y, bb.depth);
     }
     else {
         bb.isTracking = false;
         bb.upperLeft = Point(0, 0);
         bb.lowerRight = Point(bb.imgWidth, bb.imgHeight);
-        ROS_INFO("lost track");
+        ROS_WARN_NAMED(ZED_DEPTH_LOG, "Invalid Zed meaurements: %g", depths[nearestPixelIdx]);
     }
 
 
